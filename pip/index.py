@@ -193,22 +193,23 @@ class PackageFinder(object):
         url_name = req.url_name
         # Only check main index if index URL is given:
         main_index_url = None
-        if self.index_urls:
-            # Check that we have the url_name correctly spelled:
-            main_index_url = Link(mkurl_pypi_url(self.index_urls[0]), trusted=True)
-            # This will also cache the page, so it's okay that we get it again later:
-            page = self._get_page(main_index_url, req)
-            if page is None:
-                url_name = self._find_url_name(Link(self.index_urls[0], trusted=True), url_name, req) or req.url_name
-
         if url_name is not None:
+            if self.index_urls:
+                # Check that we have the url_name correctly spelled:
+                main_index_url = Link(mkurl_pypi_url(self.index_urls[0]), trusted=True)
+                # This will also cache the page, so it's okay that we get it again later:
+                page = self._get_page(main_index_url, req)
+                if page is None:
+                    url_name = self._find_url_name(Link(self.index_urls[0], trusted=True), url_name, req) or req.url_name
+
             locations = [
                 mkurl_pypi_url(url)
                 for url in self.index_urls] + self.find_links
         else:
             locations = list(self.find_links)
-        for version in req.absolute_versions:
-            if url_name is not None and main_index_url is not None:
+
+        if url_name is not None and main_index_url is not None:
+            for version in req.absolute_versions:
                 locations = [
                     posixpath.join(main_index_url.url, version)] + locations
 
@@ -268,7 +269,12 @@ class PackageFinder(object):
             logger.info('dependency_links found: %s' % ', '.join([link.url for parsed, link, version in dependency_versions]))
         file_versions = list(self._package_versions(
                 [Link(url) for url in file_locations], req.name.lower()))
-        if not found_versions and not page_versions and not dependency_versions and not file_versions:
+
+        url_version = []
+        if req.url is not None:
+            url_version = list(self._package_versions([Link(req.url)], req.name.lower()))
+
+        if not url_version and not found_versions and not page_versions and not dependency_versions and not file_versions:
             logger.fatal('Could not find any downloads that satisfy the requirement %s' % req)
 
             if self.need_warn_external:
@@ -283,11 +289,12 @@ class PackageFinder(object):
         installed_version = []
         if req.satisfied_by is not None:
             installed_version = [(req.satisfied_by.parsed_version, InfLink, req.satisfied_by.version)]
+
         if file_versions:
             file_versions.sort(reverse=True)
             logger.info('Local files found: %s' % ', '.join([url_to_path(link.url) for parsed, link, version in file_versions]))
         #this is an intentional priority ordering
-        all_versions = installed_version + file_versions + found_versions + page_versions + dependency_versions
+        all_versions = installed_version + url_version + file_versions + found_versions + page_versions + dependency_versions
         applicable_versions = []
         for (parsed_version, link, version) in all_versions:
             if version not in req.req:
@@ -459,10 +466,11 @@ class PackageFinder(object):
         Meant to be overridden by subclasses, not called by clients.
         """
         platform = get_platform()
+        import inspect
 
         version = None
         if link.egg_fragment:
-            egg_info = link.egg_fragment
+            egg_info, version = split_package(link.egg_fragment)
         else:
             egg_info, ext = link.splitext()
             if not ext:
@@ -978,14 +986,16 @@ def get_requirement_from_url(url):
 
 def package_to_requirement(package_name):
     """Translate a name like Foo-1.2 to Foo==1.3"""
-    match = re.search(r'^(.*?)-(dev|\d.*)', package_name)
-    if match:
-        name = match.group(1)
-        version = match.group(2)
-    else:
-        name = package_name
-        version = ''
+    name, version = split_package(package_name)
     if version:
         return '%s==%s' % (name, version)
     else:
         return name
+
+
+def split_package(package_name):
+    match = re.search(r'^(.*?)-(dev|\d.*)', package_name)
+    if match:
+        return (match.group(1), match.group(2))
+    else:
+        return (package_name, None)

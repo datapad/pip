@@ -25,7 +25,7 @@ from pip.util import (display_path, rmtree, ask, ask_path_exists, backup_dir,
 from pip.backwardcompat import (urlparse, urllib, uses_pycache,
                                 ConfigParser, string_types, HTTPError,
                                 get_python_version, b)
-from pip.index import Link
+from pip.index import Link, package_to_requirement
 from pip.locations import build_prefix
 from pip.download import (get_file_content, is_url, url_to_path,
                           path_to_url, is_archive_file,
@@ -115,9 +115,11 @@ class InstallRequirement(object):
 
         # If the line has an egg= definition, but isn't editable, pull the requirement out.
         # Otherwise, assume the name is the req for the non URL/path/archive case.
-        if link and req is None:
+        if link:
             url = link.url_without_fragment
             req = link.egg_fragment  #when fragment is None, this will become an 'unnamed' requirement
+            if req:
+                req = package_to_requirement(req)
 
             # Handle relative file URLs
             if link.scheme == 'file' and re.search(r'\.\./', url):
@@ -1076,14 +1078,13 @@ class RequirementSet(object):
                         """ % (req_to_install, location)))
                     else:
                         ## FIXME: this won't upgrade when there's an existing package unpacked in `location`
-                        if req_to_install.url is None:
-                            if not_found:
-                                raise not_found
+                        if req_to_install.url is None and not_found:
+                            raise not_found
+                        ## FIXME: should req_to_install.url already be a link if it's not None?
+                        if req_to_install.url_name is not None:
                             url = finder.find_requirement(req_to_install, upgrade=self.upgrade)
                         else:
-                            ## FIXME: should req_to_install.url already be a link?
                             url = Link(req_to_install.url)
-                            assert url
                         if url:
                             try:
                                 self.unpack_url(url, location, self.is_download)

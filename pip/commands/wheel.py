@@ -137,8 +137,8 @@ class WheelCommand(Command):
 
         for filename in options.requirements:
             for req in parse_requirements(filename, finder=finder, options=options):
-                if req.editable or (req.name is None and req.url.endswith(".whl")):
-                    logger.notify("ignoring %s" % req.url)
+                if req.editable or (req.name is None and req.link.filename.endswith(".whl")):
+                    logger.notify("ignoring %s" % req.link.url_without_fragment)
                     continue
                 requirement_set.add_requirement(req)
 

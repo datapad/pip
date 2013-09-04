@@ -25,7 +25,7 @@ from pip.util import (display_path, rmtree, ask, ask_path_exists, backup_dir,
 from pip.backwardcompat import (urlparse, urllib, uses_pycache,
                                 ConfigParser, string_types, HTTPError,
                                 get_python_version, b)
-from pip.index import Link, package_to_requirement
+from pip.index import Link, package_to_requirement, split_package
 from pip.locations import build_prefix
 from pip.download import (get_file_content, is_url, url_to_path,
                           path_to_url, is_archive_file,
@@ -120,11 +120,10 @@ class InstallRequirement(object):
         # If the line has an egg= definition, but isn't editable, pull the requirement out.
         # Otherwise, assume the name is the req for the non URL/path/archive case.
         if link:
-            req = link.egg_fragment  #when fragment is None, this will become an 'unnamed' requirement
-            if req:
-                req = package_to_requirement(req)
+            if link.egg_fragment: #when fragment is None, this will become an 'unnamed' requirement
+                req = package_to_requirement(link.egg_fragment)
             else:
-                req = link.filename
+                req = None
 
         return cls(req, comes_from, link=link, prereleases=prereleases)
 
@@ -1077,8 +1076,7 @@ class RequirementSet(object):
                         ## FIXME: this won't upgrade when there's an existing package unpacked in `location`
                         if req_to_install.link is None and not_found:
                             raise not_found
-                        ## FIXME: should req_to_install.link already be a link if it's not None?
-                        if req_to_install.url_name is not None:
+                        if req_to_install.url_name is not None or req_to_install.link and req_to_install.link.egg_fragment and split_package(link.egg_fragment)[1]:
                             link = finder.find_requirement(req_to_install, upgrade=self.upgrade)
                         else:
                             link = req_to_install.link

@@ -510,7 +510,7 @@ class PackageFinder(object):
                 comes_from = getattr(link, "comes_from", None)
                 if (not platform.startswith('win')
                     and comes_from is not None
-                    and urlparse.urlparse(comes_from.link.url).netloc.endswith(
+                    and urlparse.urlparse(comes_from.url).netloc.endswith(
                                                         "pypi.python.org")):
                     if not link.wheel.supported(tags=supported_tags_noarch):
                         logger.debug(

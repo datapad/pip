@@ -37,7 +37,7 @@ from pip.wheel import move_wheel_files
 class InstallRequirement(object):
 
     def __init__(self, req, comes_from, source_dir=None, editable=False,
-                 url=None, as_egg=False, update=True, prereleases=None,
+                 link=None, as_egg=False, update=True, prereleases=None,
                  from_bundle=False):
         self.extras = ()
         if isinstance(req, string_types):
@@ -47,7 +47,7 @@ class InstallRequirement(object):
         self.comes_from = comes_from
         self.source_dir = source_dir
         self.editable = editable
-        self.url = url
+        self.link = link
         self.as_egg = as_egg
         self._egg_info_path = None
         # This holds the pkg_resources.Distribution object if this requirement
@@ -84,7 +84,8 @@ class InstallRequirement(object):
         else:
             source_dir = None
 
-        res = cls(name, comes_from, source_dir=source_dir, editable=True, url=url, prereleases=True)
+        link = Link(url) # TODO pass comes_from?
+        res = cls(name, comes_from, source_dir=source_dir, editable=True, link=link, prereleases=True)
 
         if extras_override is not None:
             res.extras = extras_override
@@ -98,12 +99,15 @@ class InstallRequirement(object):
         """
         url = None
         name = name.strip()
-        req = None
+        req = name
         path = os.path.normpath(os.path.abspath(name))
         link = None
 
         if is_url(name):
             link = Link(name)
+            # Handle relative file URLs
+            if link.scheme == 'file' and re.search(r'\.\./', url):
+                link = Link(path_to_url(os.path.normpath(os.path.abspath(link.path))))
         elif os.path.isdir(path) and (os.path.sep in name or name.startswith('.')):
             if not is_installable_dir(path):
                 raise InstallationError("Directory %r is not installable. File 'setup.py' not found." % name)
@@ -116,27 +120,21 @@ class InstallRequirement(object):
         # If the line has an egg= definition, but isn't editable, pull the requirement out.
         # Otherwise, assume the name is the req for the non URL/path/archive case.
         if link:
-            url = link.url_without_fragment
             req = link.egg_fragment  #when fragment is None, this will become an 'unnamed' requirement
             if req:
                 req = package_to_requirement(req)
+            else:
+                req = link.filename
 
-            # Handle relative file URLs
-            if link.scheme == 'file' and re.search(r'\.\./', url):
-                url = path_to_url(os.path.normpath(os.path.abspath(link.path)))
-
-        else:
-            req = name
-
-        return cls(req, comes_from, url=url, prereleases=prereleases)
+        return cls(req, comes_from, link=link, prereleases=prereleases)
 
     def __str__(self):
         if self.req:
             s = str(self.req)
-            if self.url:
-                s += ' from %s' % self.url
+            if self.link:
+                s += ' from %s' % self.link.url_without_fragment
         else:
-            s = self.url
+            s = self.link.url_without_fragment
         if self.satisfied_by is not None:
             s += ' in %s' % display_path(self.satisfied_by.location)
         if self.comes_from:
@@ -227,7 +225,7 @@ class InstallRequirement(object):
         if self.name:
             logger.notify('Running setup.py egg_info for package %s' % self.name)
         else:
-            logger.notify('Running setup.py egg_info for package from %s' % self.url)
+            logger.notify('Running setup.py egg_info for package from %s' % self.link.url_without_fragment)
         logger.indent += 2
         try:
 
@@ -291,7 +289,6 @@ exec(compile(open(__file__).read().replace('\\r\\n', '\\n'), __file__, 'exec'))
             if not self.satisfied_by.has_metadata(filename):
                 return None
             return self.satisfied_by.get_metadata(filename)
-        assert self.source_dir
         filename = self.egg_info_path(filename)
         if not os.path.exists(filename):
             return None
@@ -401,21 +398,21 @@ exec(compile(open(__file__).read().replace('\\r\\n', '\\n'), __file__, 'exec'))
                          % (display_path(self.source_dir), version, self))
 
     def update_editable(self, obtain=True):
-        if not self.url:
+        if not self.link:
             logger.info("Cannot update repository at %s; repository location is unknown" % self.source_dir)
             return
         assert self.editable
         assert self.source_dir
-        if self.url.startswith('file:'):
+        if self.link.scheme == 'file':
             # Static paths don't get updated
             return
-        assert '+' in self.url, "bad url: %r" % self.url
+        assert '+' in self.link.scheme, "bad url: %r" % self.url_without_fragment
         if not self.update:
             return
-        vc_type, url = self.url.split('+', 1)
+        vc_type, url = self.link.scheme.split('+', 1)
         backend = vcs.get_backend(vc_type)
         if backend:
-            vcs_backend = backend(self.url)
+            vcs_backend = backend(self.link.url_without_fragment)
             if obtain:
                 vcs_backend.obtain(self.source_dir)
             else:
@@ -423,7 +420,7 @@ exec(compile(open(__file__).read().replace('\\r\\n', '\\n'), __file__, 'exec'))
         else:
             assert 0, (
                 'Unexpected version control type (in %s): %s'
-                % (self.url, vc_type))
+                % (self.link.url_without_fragment, vc_type))
 
     def uninstall(self, auto_confirm=False):
         """
@@ -745,7 +742,7 @@ exec(compile(open(__file__).read().replace('\\r\\n', '\\n'), __file__, 'exec'))
 
     @property
     def is_wheel(self):
-        return self.url and '.whl' in self.url
+        return self.link and self.link.path.endswith('.whl')
 
     @property
     def is_bundle(self):
@@ -775,11 +772,11 @@ exec(compile(open(__file__).read().replace('\\r\\n', '\\n'), __file__, 'exec'))
                     url, rev = vcs_backend().parse_vcs_bundle_file(content)
                     break
             if url:
-                url = '%s+%s@%s' % (vc_type, url, rev)
+                link = Link('%s+%s@%s' % (vc_type, url, rev))
             else:
-                url = None
+                link = None
             yield InstallRequirement(
-                package, self, editable=True, url=url,
+                package, self, editable=True, link=link,
                 update=False, source_dir=dest_dir, from_bundle=True)
         for dest_dir in self._bundle_build_dirs:
             package = os.path.basename(dest_dir)
@@ -997,9 +994,9 @@ class RequirementSet(object):
                 req_to_install.check_if_exists()
                 if req_to_install.satisfied_by:
                     if self.upgrade:
-                        if not self.force_reinstall and not req_to_install.url:
+                        if not self.force_reinstall and not req_to_install.link:
                             try:
-                                url = finder.find_requirement(
+                                link = finder.find_requirement(
                                     req_to_install, self.upgrade)
                             except BestVersionAlreadyInstalled:
                                 best_installed = True
@@ -1008,7 +1005,7 @@ class RequirementSet(object):
                                 not_found = sys.exc_info()[1]
                             else:
                                 # Avoid the need to call find_requirement again
-                                req_to_install.url = url.url
+                                req_to_install.link = link
 
                         if not best_installed:
                             #don't uninstall conflict if user install and conflict is not user install
@@ -1028,8 +1025,8 @@ class RequirementSet(object):
             if req_to_install.editable:
                 logger.notify('Obtaining %s' % req_to_install)
             elif install:
-                if req_to_install.url and req_to_install.url.lower().startswith('file:'):
-                    logger.notify('Unpacking %s' % display_path(url_to_path(req_to_install.url)))
+                if req_to_install.link and req_to_install.link.scheme == 'file':
+                    logger.notify('Unpacking %s' % display_path(url_to_path(req_to_install.link.url_without_fragment)))
                 else:
                     logger.notify('Downloading/unpacking %s' % req_to_install)
             logger.indent += 2
@@ -1059,7 +1056,7 @@ class RequirementSet(object):
                     # NB: This call can result in the creation of a temporary build directory
                     location = req_to_install.build_location(self.build_dir, not self.is_download)
                     unpack = True
-                    url = None
+                    link = None
 
                     # In the case where the req comes from a bundle, we should
                     # assume a build dir exists and move on
@@ -1078,28 +1075,28 @@ class RequirementSet(object):
                         """ % (req_to_install, location)))
                     else:
                         ## FIXME: this won't upgrade when there's an existing package unpacked in `location`
-                        if req_to_install.url is None and not_found:
+                        if req_to_install.link is None and not_found:
                             raise not_found
-                        ## FIXME: should req_to_install.url already be a link if it's not None?
+                        ## FIXME: should req_to_install.link already be a link if it's not None?
                         if req_to_install.url_name is not None:
-                            url = finder.find_requirement(req_to_install, upgrade=self.upgrade)
+                            link = finder.find_requirement(req_to_install, upgrade=self.upgrade)
                         else:
-                            url = Link(req_to_install.url)
-                        if url:
+                            link = req_to_install.link
+                        if link:
                             try:
-                                self.unpack_url(url, location, self.is_download)
+                                self.unpack_url(link, location, self.is_download)
                             except HTTPError:
                                 e = sys.exc_info()[1]
                                 logger.fatal('Could not install requirement %s because of error %s'
                                              % (req_to_install, e))
                                 raise InstallationError(
                                     'Could not install requirement %s because of HTTP error %s for URL %s'
-                                    % (req_to_install, e, url))
+                                    % (req_to_install, e, link.url_without_fragment))
                         else:
                             unpack = False
                     if unpack:
                         is_bundle = req_to_install.is_bundle
-                        is_wheel = url and url.filename.endswith('.whl')
+                        is_wheel = link and link.filename.endswith('.whl')
                         if is_bundle:
                             req_to_install.move_bundle_files(self.build_dir, self.src_dir)
                             for subreq in req_to_install.bundle_requirements():
@@ -1110,11 +1107,11 @@ class RequirementSet(object):
                             if not is_wheel:
                                 # FIXME: see https://github.com/pypa/pip/issues/1112
                                 req_to_install.run_egg_info()
-                            if url and url.scheme in vcs.all_schemes:
+                            if link and link.scheme in vcs.all_schemes:
                                 req_to_install.archive(self.download_dir)
                         elif is_wheel:
                             req_to_install.source_dir = location
-                            req_to_install.url = url.url
+                            req_to_install.link = link
                             dist = list(pkg_resources.find_distributions(location))[0]
                             if not req_to_install.req:
                                 req_to_install.req = dist.as_requirement()
@@ -1136,7 +1133,7 @@ class RequirementSet(object):
                                 req_to_install.run_egg_info(force_root_egg_info=True)
                             req_to_install.assert_source_matches_version()
                             #@@ sketchy way of identifying packages not grabbed from an index
-                            if bundle and req_to_install.url:
+                            if bundle and req_to_install.link:
                                 self.copy_to_build_dir(req_to_install)
                                 install = False
                         # req_to_install.req is only avail after unpack for URL pkgs
@@ -1180,7 +1177,7 @@ class RequirementSet(object):
 
                 if install:
                     self.successfully_downloaded.append(req_to_install)
-                    if bundle and (req_to_install.url and req_to_install.url.startswith('file:///')):
+                    if bundle and req_to_install.link and req_to_install.link.scheme == 'file':
                         self.copy_to_build_dir(req_to_install)
             finally:
                 logger.indent -= 2

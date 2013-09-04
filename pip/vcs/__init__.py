@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import urlparse
 
 from pip.backwardcompat import urlparse, urllib
 from pip.log import logger
@@ -48,6 +49,10 @@ class VcsSupport(object):
             return
         if cls.name not in self._registry:
             self._registry[cls.name] = cls
+        # register custom URL scheme with `urlparse`, so it correctly handles
+        # query parameters and fragments
+        for method in filter(lambda s: s.startswith('uses_'), dir(urlparse)):
+            getattr(urlparse, method).extend(cls.schemes)
 
     def unregister(self, cls=None, name=None):
         if name in self._registry:
@@ -121,9 +126,9 @@ class VersionControl(object):
            "Sorry, '%s' is a malformed VCS url. "
            "The format is <vcs>+<protocol>://<url>, "
            "e.g. svn+http://myrepo/svn/MyApp#egg=MyApp")
-        assert '+' in self.url, error_message % self.url
-        url = self.url.split('+', 1)[1]
-        scheme, netloc, path, query, frag = urlparse.urlsplit(url)
+        scheme, netloc, path, query, frag = urlparse.urlsplit(self.url)
+        assert '+' in scheme, error_message % self.url
+        scheme = scheme.split('+', 1)[1]
         rev = None
         if '@' in path:
             path, rev = path.rsplit('@', 1)

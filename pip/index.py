@@ -43,6 +43,10 @@ INSECURE_SCHEMES = {
 }
 
 
+# register custom URL scheme with `urlparse`, so it correctly handles query parameters
+for method in filter(lambda s: s.startswith('uses_'), dir(urlparse)):
+    getattr(urlparse, method).append('s3')
+
 class PackageFinder(object):
     """This finds packages.
 
@@ -271,8 +275,8 @@ class PackageFinder(object):
                 [Link(url) for url in file_locations], req.name.lower()))
 
         url_version = []
-        if req.url is not None:
-            url_version = list(self._package_versions([Link(req.url)], req.name.lower()))
+        if req.link is not None:
+            url_version = list(self._package_versions([req.link], req.name.lower()))
 
         if not url_version and not found_versions and not page_versions and not dependency_versions and not file_versions:
             logger.fatal('Could not find any downloads that satisfy the requirement %s' % req)
@@ -466,7 +470,6 @@ class PackageFinder(object):
         Meant to be overridden by subclasses, not called by clients.
         """
         platform = get_platform()
-        import inspect
 
         version = None
         if link.egg_fragment:
@@ -507,7 +510,7 @@ class PackageFinder(object):
                 comes_from = getattr(link, "comes_from", None)
                 if (not platform.startswith('win')
                     and comes_from is not None
-                    and urlparse.urlparse(comes_from.url).netloc.endswith(
+                    and urlparse.urlparse(comes_from.link.url).netloc.endswith(
                                                         "pypi.python.org")):
                     if not link.wheel.supported(tags=supported_tags_noarch):
                         logger.debug(
@@ -551,7 +554,7 @@ class PackageFinder(object):
             if py_version != sys.version[:3]:
                 logger.debug('Skipping %s because Python version is incorrect' % link)
                 return []
-        logger.debug('Found link %s, version: %s' % (link, version))
+        logger.debug('Found link %s, version: %s' % (link.url_without_fragment, version))
         return [(pkg_resources.parse_version(version),
                link,
                version)]

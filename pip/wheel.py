@@ -322,7 +322,7 @@ class WheelBuilder(object):
         build_success, build_failure = [], []
         for req in reqset:
             if req.is_wheel:
-                logger.notify("Skipping building wheel: %s", req.url)
+                logger.notify("Skipping building wheel: %s", req.link.url)
                 continue
             if self._build_one(req):
                 build_success.append(req)

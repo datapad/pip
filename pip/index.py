@@ -997,8 +997,5 @@ def package_to_requirement(package_name):
 
 
 def split_package(package_name):
-    match = re.search(r'^(.*?)-(dev|\d.*)', package_name)
-    if match:
-        return (match.group(1), match.group(2))
-    else:
-        return (package_name, None)
+    name, _, version = package_name.partition('-')
+    return (name, version if len(version) > 0 else None)

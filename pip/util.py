@@ -596,14 +596,18 @@ def untar_file(filename, location):
         tar.close()
 
 _MAX_FILENAME_LENGTH = 255
-_HASHLIB_NAME = 'sha1'
 _HASH_LENGTH = 7
 
 def shorten_filename(filename, suffix=''):
-    if len(filename) <= _MAX_FILENAME_LENGTH - len(suffix):
+    max_prefix_length = _MAX_FILENAME_LENGTH - len(suffix)
+    if len(filename) <= max_prefix_length:
         return filename + suffix
-    return filename[:_MAX_FILENAME_LENGTH - _HASH_LENGTH - len(suffix)] + hashlib.new(_HASHLIB_NAME)[:_HASH_LENGTH] + suffix
-
+    split = max_prefix_length - _HASH_LENGTH - 1
+    return "{}-{}{}".format(
+        filename[:split],
+        hashlib.sha1(filename[split:]).hexdigest()[:_HASH_LENGTH],
+        suffix
+    )
 
 def create_download_cache_folder(folder):
     logger.indent -= 2
